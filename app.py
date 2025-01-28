@@ -1,4 +1,3 @@
-
 import streamlit as st
 from openai import OpenAI
 import os
@@ -25,7 +24,7 @@ else:
 
 # Initialize the Streamlit app
 def main():
-    st.set_page_config(page_title="Axo", page_icon="🧠")
+    st.set_page_config(page_title="Argo", page_icon="🧠")
 
     # Show title and description.
     st.title("Argo 🧠")
