@@ -211,20 +211,20 @@ def generate_informe_prepost_cem_3pages(
 
     # Pag 1
     pdf.add_page()
-    pdf.set_font("Arial", "B", 20)
+    pdf.set_font("Calibri", "B", 44)
     pdf.ln(40)
     pdf.cell(0, 10, "Estudio comparativo de alumnos CEM 2025", ln=True, align="C")
     pdf.ln(10)
-    pdf.set_font("Arial", "", 14)
+    pdf.set_font("Calibri", "", 28)
     pdf.multi_cell(0, 8, "Evaluación de funciones ejecutivas pre y post período de aplicación de programa CEM", align="C")
 
     # Pag 2
     pdf.add_page()
-    pdf.set_font("Arial", "B", 18)
+    pdf.set_font("Calibri", "B", 44)
     pdf.ln(20)
     pdf.cell(0, 10, "Metodología", ln=True, align="C")
     pdf.ln(10)
-    pdf.set_font("Arial", "", 12)
+    pdf.set_font("Calibri", "", 28)
     metodologia_text = (
         "* Administración pre/post de Yelow red (funciones ejecutivas)\n"
         "* Experiencia de intervención realizada en el programa\n"
@@ -237,10 +237,15 @@ def generate_informe_prepost_cem_3pages(
     with open("temp_chart.png", "wb") as tmp_img:
         tmp_img.write(buf.getvalue())
 
-    pdf.set_font("Arial", "B", 16)
+    pdf.set_font("Calibri", "B", 32)
     pdf.ln(10)
-    pdf.cell(0, 10, f"Informe Pre-Post de {patient_name} (edad {patient_age})", ln=True, align="C")
-    pdf.image("temp_chart.png", x=30, y=30, w=220)
+    pdf.cell(0, 10, f"{patient_name} (edad {patient_age})", ln=True)
+
+    # Posicionar el gráfico a la derecha.
+    # En orientación landscape A4, el ancho total es ~297 mm.
+    # Se coloca la imagen en x=150 mm para ubicarse en la mitad derecha,
+    # y se ajusta el ancho de la imagen a 120 mm.
+    pdf.image(temp_img_path, x=150, y=20, w=120)
 
     pdf_bytes = pdf.output(dest="S").encode("latin-1", errors="replace")
     return pdf_bytes
