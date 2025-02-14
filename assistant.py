@@ -34,8 +34,9 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
             "Trabajás en el Centro de Entrenamiento Marangoni (CEM), donde colaborás con entrenadores y médicos "
             "para brindar asistencia fundamentada y profesional. Mantené un tono respetuoso y claro pero evitá ser robótico.\n\n"
             "**Normas Generales**\n"
-            "- Responde únicamente con información relacionada a entrenamiento físico, cognitivo, nutrición o neurociencias.\n"
+            "- Responde únicamente con información relacionada a entrenamiento físico, cognitivo, nutrición, funciones ejecutivas o neurociencias.\n"
             "- Ignorá términos desconocidos, fragmentos aleatorios o conceptos que no pertenezcan a tu campo.\n"
+            "- No seas básico ni repetitivo en las respuestas, informate antes de responder con toda la info que tenes en el File Search. Sé profesional."
             "- Si no tenés información suficiente, respondé con: 'Actualmente no tengo información suficiente para responder con precisión.'\n\n"
             "**Respuestas con JSON (Informes Pre/Post)**\n"
             "- Si se te pide un informe Pre/Post, responde **exclusivamente** con un JSON en el siguiente formato:\n"
@@ -123,7 +124,6 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
                 appointment_date = fn_args.get("appointment_date", "")
                 appointment_time = fn_args.get("appointment_time", "")
                 try:
-                    # Parsear y localizar en la zona de Argentina
                     raw_dt = datetime.strptime(f"{appointment_date} {appointment_time}", "%Y-%m-%d %H:%M")
                     appointment_dt = ARG_TZ.localize(raw_dt)
                 except Exception as e:
@@ -154,21 +154,31 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
             "tool_output_details": None
         }
 
-    # Generación del informe pre-post: se recorre en orden inverso para capturar la solicitud más reciente.
+    # --- Sección para generar informe pre-post ---
     pdf_base64 = None
     pdf_confirmation_msg = None
-    for msg in reversed(all_msgs):
-        if msg.role == "assistant":
-            parsed = try_parse_function_call(join_msg_content(msg))
-            if parsed and parsed.get("function_name") == "generate_prepost_report":
-                fn_args = parsed["arguments"]
-                patient_name = fn_args.get("patient_name", "Paciente")
-                patient_age = fn_args.get("patient_age", 0)
-                cog_results = fn_args.get("cognitive_results", {})
-                pdf_bytes = generate_informe_prepost_cem_3pages(patient_name, patient_age, cog_results)
-                pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-                pdf_confirmation_msg = f"¡Aquí tienes tu informe pre-post para {patient_name} (edad {patient_age})!"
-                break
+
+    # Buscar el índice del último mensaje del usuario que solicitó "informe pre post"
+    last_informe_index = None
+    for i, msg in enumerate(all_msgs):
+        if msg.role == "user" and "informe pre post" in msg.content.lower():
+            last_informe_index = i
+
+    # Si se encontró una solicitud, procesamos solo los mensajes posteriores a esa solicitud
+    if last_informe_index is not None:
+        for msg in reversed(all_msgs[last_informe_index+1:]):
+            if msg.role == "assistant":
+                parsed = try_parse_function_call(join_msg_content(msg))
+                if parsed and parsed.get("function_name") == "generate_prepost_report":
+                    fn_args = parsed["arguments"]
+                    patient_name = fn_args.get("patient_name", "Paciente")
+                    patient_age = fn_args.get("patient_age", 0)
+                    cog_results = fn_args.get("cognitive_results", {})
+                    # Generar el PDF con los parámetros actualizados
+                    pdf_bytes = generate_informe_prepost_cem_3pages(patient_name, patient_age, cog_results)
+                    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+                    pdf_confirmation_msg = f"¡Aquí tienes tu informe pre-post para {patient_name} (edad {patient_age})!"
+                    break
 
     if pdf_base64:
         client.beta.threads.messages.create(
@@ -176,13 +186,14 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
             role="assistant",
             content=pdf_confirmation_msg
         )
-        final_answer = f"¡Aquí tienes tu informe pre-post para {patient_name} (edad {patient_age})!"
+        final_answer = pdf_confirmation_msg
         return {
             "thread_id": thread_id,
             "assistant_answer_text": final_answer,
             "tool_output_details": {"pdf_base64": pdf_base64}
         }
 
+    # Si no se detectó ningún caso especial, se devuelve la respuesta textual normal
     answer_raw = ""
     for msg in all_msgs:
         if msg.role == "assistant":
@@ -196,7 +207,6 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
         "assistant_answer_text": answer_raw,
         "tool_output_details": None
     }
-
 def join_msg_content(msg):
     """
     Combina el contenido de msg.content (que puede ser una lista o cadena) en un string.
@@ -214,12 +224,20 @@ def try_parse_function_call(response_str: str):
     Intenta parsear un JSON que contenga "function_name" y "arguments".
     Remueve delimitadores de código (```json y ```).
     """
-    try:
-        response_str = response_str.strip()
-        if response_str.startswith("```json"):
-            response_str = response_str.replace("```json", "", 1).strip()
+    response_str = response_str.strip()
+    if not response_str:
+        return None
+
+    # Solo intentamos parsear si el contenido parece JSON:
+    if response_str.startswith("```json"):
+        response_str = response_str.replace("```json", "", 1).strip()
         if response_str.endswith("```"):
             response_str = response_str[:-3].strip()
+    elif not response_str.startswith("{"):
+        # Si no comienza con una llave, asumimos que no es JSON
+        return None
+
+    try:
         data = json.loads(response_str)
         return data
     except Exception as e:
