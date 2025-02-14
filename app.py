@@ -12,101 +12,9 @@ from datetime import datetime
 from recordatorios import agendar_turno_y_programar_recordatorios
 from database import get_appointment
 import re
-import pytz  # Para trabajar con zona horaria
-import random  # Para selección aleatoria
+import pytz 
+import random
 
-
-def parse_rutina_request(texto):
-    """
-    Extrae un diccionario con la cantidad de ejercicios solicitados para cada categoría.
-    Ejemplo: "2 ejercicios de zona media, 3 de fuerza, 2 enfocados en el rugby y 3 de cognitivos"
-    devolvería: {"Zona Media": 2, "Fuerza": 3, "Deporte": 2, "Cognitivos": 3}
-    """
-    patrones = {
-        "Zona Media": r"(\d+)\s*ejercicios?\s*de\s*zona\s*media",
-        "Fuerza": r"(\d+)\s*ejercicios?\s*de\s*fuerza",
-        # Para Deporte se acepta tanto "de deporte(s)" como "enfocados en (el) rugby" o "de rugby"
-        "Deporte": r"(\d+)\s*(?:ejercicios?\s*(?:de\s*deporte[s]?|enfocados\s*(?:en\s*)?(?:rugby)))",
-        "Cognitivos": r"(\d+)\s*ejercicios?\s*de\s*cognitivo[s]?"
-    }
-    resultados = {}
-    for categoria, patron in patrones.items():
-        match = re.search(patron, texto, re.IGNORECASE)
-        if match:
-            resultados[categoria] = int(match.group(1))
-    return resultados
-
-def get_physical_exercises_by_category(texto):
-    """
-    Procesa el archivo de ejercicios físicos y devuelve un diccionario con listas por categoría.
-    Se esperan secciones cuyo nombre sea exactamente: "Zona Media", "Fuerza" y "Deporte".
-    """
-    categorias_interes = {"Zona Media", "Fuerza", "Deporte"}
-    ejercicios = {cat: [] for cat in categorias_interes}
-    current_cat = None
-    lines = texto.splitlines()
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        # Si la línea coincide con alguna categoría de interés, actualizamos current_cat
-        if line in categorias_interes:
-            current_cat = line
-            continue
-        # Si tenemos una categoría activa, agregamos la línea
-        if current_cat:
-            ejercicios[current_cat].append(line)
-    return ejercicios
-
-def get_cognitive_exercises(texto):
-    """
-    Procesa el archivo de ejercicios cognitivos y devuelve una lista de ejercicios.
-    Se omite la cabecera si existe (por ejemplo, líneas que comiencen con "-Cognitivo").
-    """
-    lines = texto.splitlines()
-    ejercicios = []
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        if line.lower().startswith("-cognit"):
-            continue
-        ejercicios.append(line)
-    return ejercicios
-
-def armar_rutina(solicitud_texto, fisicos_text, cognitivos_text):
-    """
-    Dada la solicitud del usuario (texto que indica cantidades por categoría) y los contenidos de
-    los archivos, arma una rutina seleccionando aleatoriamente los ejercicios solicitados.
-    """
-    cantidades = parse_rutina_request(solicitud_texto)
-    rutina = "Aquí tienes tu planificación:\n\n"
-    # Procesar ejercicios físicos
-    if fisicos_text:
-        fisicos_dict = get_physical_exercises_by_category(fisicos_text)
-        for categoria in ["Zona Media", "Fuerza", "Deporte"]:
-            if categoria in cantidades:
-                cantidad = cantidades[categoria]
-                disponibles = fisicos_dict.get(categoria, [])
-                if disponibles:
-                    if len(disponibles) < cantidad:
-                        seleccionados = disponibles  # si no hay suficientes, tomar todos
-                    else:
-                        seleccionados = random.sample(disponibles, cantidad)
-                    rutina += f"**{categoria}**:\n" + "\n".join(f"- {ej}" for ej in seleccionados) + "\n\n"
-    # Procesar ejercicios cognitivos
-    if cognitivos_text and "Cognitivos" in cantidades:
-        cognitivos_list = get_cognitive_exercises(cognitivos_text)
-        cantidad = cantidades["Cognitivos"]
-        if cognitivos_list:
-            if len(cognitivos_list) < cantidad:
-                seleccionados = cognitivos_list
-            else:
-                seleccionados = random.sample(cognitivos_list, cantidad)
-            rutina += "**Cognitivos**:\n" + "\n".join(f"- {ej}" for ej in seleccionados) + "\n\n"
-    if rutina.strip() == "Aquí tienes tu planificación:":
-        rutina += "No se pudieron seleccionar ejercicios. Verifica la solicitud y el contenido de los archivos."
-    return rutina
 # Inicialización del cliente OpenAI
 openai_api_key = st.secrets["OPENAI_API_KEY"]
 if openai_api_key:
@@ -247,83 +155,57 @@ def main():
         with st.chat_message("user"):
             st.markdown(user_input)
 
-        # Si el mensaje incluye una solicitud de turno, se procesa como turno
         if "agendale un turno" in user_input.lower():
             info = extract_appointment_info(user_input)
             if info is None:
-                respuesta = ("No pude extraer la información del turno. "
-                             "Asegúrate de usar el formato: 'agendale un turno a [nombre] "
-                             "para el [día] de [mes] a las [hora] Hs'.")
+                respuesta = "No pude extraer la información del turno. Por favor, asegúrate de usar el formato: 'agendale un turno a [nombre] para el [día] de [mes] a las [hora] Hs'."
                 response = {}
             else:
                 patient_key, patient_name, appointment_dt = info
                 patient_data = get_appointment(patient_key)
                 if patient_data is None:
-                    respuesta = (f"El paciente {patient_name} no se encuentra en la base de datos. "
-                                 "Por favor, regístralo antes de agendar un turno.")
+                    respuesta = f"El paciente {patient_name} no se encuentra en la base de datos. Por favor, regístralo antes de agendar un turno."
                     response = {}
                 else:
                     patient_whatsapp = patient_data.get("whatsapp")
                     agendar_turno_y_programar_recordatorios(patient_key, patient_name, patient_whatsapp, appointment_dt)
-                    respuesta = (f"Turno agendado para {patient_name} el "
-                                 f"{appointment_dt.strftime('%d/%m/%Y a las %H:%M')}. Se ha enviado un WhatsApp de confirmación.")
+                    respuesta = f"Turno agendado para {patient_name} el {appointment_dt.strftime('%d/%m/%Y a las %H:%M')}. Se ha enviado un WhatsApp de confirmación."
                     response = {}
-        # Si el mensaje solicita una rutina (por ejemplo, incluye la palabra "rutina")
-        elif "rutina" in user_input.lower():
-            # Se espera que el usuario indique cantidades por categoría (ejemplo: "2 ejercicios de zona media, 3 de fuerza, 2 de deportes y 3 cognitivos")
-            rutina_plan = armar_rutina(user_input, st.session_state.ejercicios_fisicos or "", st.session_state.ejercicios_cognitivos or "")
-            # En este caso, en lugar de enviar el prompt al asistente, Argo responde con la planificación generada.
-            respuesta = rutina_plan
-            response = {}
         else:
-            # Si no es turno ni rutina, se arma el prompt "normal"
             final_input = user_input
             if st.session_state.archivo_context:
                 final_input += f"\n\n[Contenido del archivo subido]:\n{st.session_state['archivo_context']}"
             
-            # Incorporar ejemplos de ejercicios si se menciona "planificar" o "ejercicios" (se envía solo un subconjunto)
+            # Incorporar la base de datos de ejercicios según lo solicitado en el mensaje
             user_input_lower = user_input.lower()
             if "planificar" in user_input_lower:
                 if st.session_state.ejercicios_fisicos:
-                    # Selecciona 5 ejercicios de cada base (ejemplo)
-                    lines_fisicos = st.session_state.ejercicios_fisicos.splitlines()
-                    lines_fisicos = [line.strip() for line in lines_fisicos if line.strip()]
-                    subset_fisicos = "\n".join(random.sample(lines_fisicos, min(5, len(lines_fisicos))))
-                    final_input += f"\n\n[Ejercicios físicos (ejemplo)]:\n{subset_fisicos}"
+                    final_input += f"\n\n[Ejercicios físicos]:\n{st.session_state.ejercicios_fisicos}"
                 if st.session_state.ejercicios_cognitivos:
-                    lines_cognitivos = st.session_state.ejercicios_cognitivos.splitlines()
-                    lines_cognitivos = [line.strip() for line in lines_cognitivos if line.strip()]
-                    subset_cognitivos = "\n".join(random.sample(lines_cognitivos, min(5, len(lines_cognitivos))))
-                    final_input += f"\n\n[Ejercicios cognitivos (ejemplo)]:\n{subset_cognitivos}"
+                    final_input += f"\n\n[Ejercicios cognitivos]:\n{st.session_state.ejercicios_cognitivos}"
             else:
                 agregado = False
+                # BuscaAmos variaciones para ejercicios cognitivos
                 if "cognitiv" in user_input_lower:
                     if st.session_state.ejercicios_cognitivos:
-                        lines_cognitivos = st.session_state.ejercicios_cognitivos.splitlines()
-                        lines_cognitivos = [line.strip() for line in lines_cognitivos if line.strip()]
-                        subset_cognitivos = "\n".join(random.sample(lines_cognitivos, min(5, len(lines_cognitivos))))
-                        final_input += f"\n\n[Ejercicios cognitivos (ejemplo)]:\n{subset_cognitivos}"
+                        final_input += f"\n\n[Ejercicios cognitivos]:\n{st.session_state.ejercicios_cognitivos}"
                         agregado = True
+                # Buscamos variaciones para ejercicios físicos
                 if "fisic" in user_input_lower or "físic" in user_input_lower:
                     if st.session_state.ejercicios_fisicos:
-                        lines_fisicos = st.session_state.ejercicios_fisicos.splitlines()
-                        lines_fisicos = [line.strip() for line in lines_fisicos if line.strip()]
-                        subset_fisicos = "\n".join(random.sample(lines_fisicos, min(5, len(lines_fisicos))))
-                        final_input += f"\n\n[Ejercicios físicos (ejemplo)]:\n{subset_fisicos}"
+                        final_input += f"\n\n[Ejercicios físicos]:\n{st.session_state.ejercicios_fisicos}"
                         agregado = True
+                # Si no se detectó ningún tipo específico pero se menciona "ejercici" (para cubrir ejercicio/ejercicios)
                 if not agregado and "ejercici" in user_input_lower:
                     if st.session_state.ejercicios_fisicos:
-                        lines_fisicos = st.session_state.ejercicios_fisicos.splitlines()
-                        lines_fisicos = [line.strip() for line in lines_fisicos if line.strip()]
-                        subset_fisicos = "\n".join(random.sample(lines_fisicos, min(5, len(lines_fisicos))))
-                        final_input += f"\n\n[Ejercicios físicos (ejemplo)]:\n{subset_fisicos}"
+                        final_input += f"\n\n[Ejercicios físicos]:\n{st.session_state.ejercicios_fisicos}"
                     if st.session_state.ejercicios_cognitivos:
-                        lines_cognitivos = st.session_state.ejercicios_cognitivos.splitlines()
-                        lines_cognitivos = [line.strip() for line in lines_cognitivos if line.strip()]
-                        subset_cognitivos = "\n".join(random.sample(lines_cognitivos, min(5, len(lines_cognitivos))))
-                        final_input += f"\n\n[Ejercicios cognitivos (ejemplo)]:\n{subset_cognitivos}"
+                        final_input += f"\n\n[Ejercicios cognitivos]:\n{st.session_state.ejercicios_cognitivos}"
             
-            # Se omite mostrar el prompt de depuración al usuario
+            # Debug: Mostrar el prompt final que se envía al asistente (comentado para el usuario)
+            # st.write("Prompt final que se envía al asistente:")
+            # st.code(final_input)
+            
             response = get_assistant_answer(client=openai_client, user_msg=final_input, thread_id=st.session_state.thread_id)
             respuesta = response["assistant_answer_text"]
             st.session_state.thread_id = response["thread_id"]
