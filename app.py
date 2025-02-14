@@ -31,7 +31,7 @@ ARG_TZ = pytz.timezone("America/Argentina/Buenos_Aires")
 def extract_appointment_info(message: str):
     """
     Extrae patient_name, day, month y hour de un mensaje que siga el patrón:
-      "agendale un turno a <patient> para el <day> de <month> a las <hour> Hs"
+      "agendale un turno a <patient> para el <day> de <mes> a las <hour> Hs"
     Retorna una tupla (patient_key, patient_name, appointment_datetime) o None si no se pudo extraer.
     La fecha se crea con la zona horaria de Argentina.
     """
@@ -94,12 +94,19 @@ def main():
         st.session_state.messages = []
     if "archivo_context" not in st.session_state:
         st.session_state.archivo_context = None
-    if "ejercicios_text" not in st.session_state:
+    if "ejercicios_fisicos" not in st.session_state:
         try:
-            with open("ejercicios.txt", "r", encoding="utf-8") as f:
-                st.session_state.ejercicios_text = f.read()
+            with open("ejercicios_fisicos.txt", "r", encoding="utf-8") as f:
+                st.session_state.ejercicios_fisicos = f.read()
         except FileNotFoundError:
-            st.session_state.ejercicios_text = None
+            st.session_state.ejercicios_fisicos = None
+
+    if "ejercicios_cognitivos" not in st.session_state:
+        try:
+            with open("ejercicios_cognitivos.txt", "r", encoding="utf-8") as f:
+                st.session_state.ejercicios_cognitivos = f.read()
+        except FileNotFoundError:
+            st.session_state.ejercicios_cognitivos = None
 
     file = st.file_uploader("", type=["pdf", "docx", "jpg", "jpeg", "png"], label_visibility="collapsed")
     if file:
@@ -167,9 +174,29 @@ def main():
             final_input = user_input
             if st.session_state.archivo_context:
                 final_input += f"\n\n[Contenido del archivo subido]:\n{st.session_state['archivo_context']}"
-            keywords = ["rutina", "ejercicios", "entrenamiento", "planificar"]
-            if st.session_state.ejercicios_text and any(k in user_input.lower() for k in keywords):
-                final_input += f"\n\n[Lista de ejercicios permitidos]:\n{st.session_state['ejercicios_text']}"
+            
+            # Incorporar la base de datos de ejercicios según lo solicitado en el mensaje
+            user_input_lower = user_input.lower()
+            if "planificar" in user_input_lower:
+                if st.session_state.ejercicios_fisicos:
+                    final_input += f"\n\n[Ejercicios físicos]:\n{st.session_state.ejercicios_fisicos}"
+                if st.session_state.ejercicios_cognitivos:
+                    final_input += f"\n\n[Ejercicios cognitivos]:\n{st.session_state.ejercicios_cognitivos}"
+            else:
+                agregado = False
+                if "cognitivo" in user_input_lower:
+                    if st.session_state.ejercicios_cognitivos:
+                        final_input += f"\n\n[Ejercicios cognitivos]:\n{st.session_state.ejercicios_cognitivos}"
+                        agregado = True
+                if "fisico" in user_input_lower or "físico" in user_input_lower:
+                    if st.session_state.ejercicios_fisicos:
+                        final_input += f"\n\n[Ejercicios físicos]:\n{st.session_state.ejercicios_fisicos}"
+                        agregado = True
+                if not agregado and "ejercicios" in user_input_lower:
+                    if st.session_state.ejercicios_fisicos:
+                        final_input += f"\n\n[Ejercicios físicos]:\n{st.session_state.ejercicios_fisicos}"
+                    if st.session_state.ejercicios_cognitivos:
+                        final_input += f"\n\n[Ejercicios cognitivos]:\n{st.session_state.ejercicios_cognitivos}"
             
             response = get_assistant_answer(client=openai_client, user_msg=final_input, thread_id=st.session_state.thread_id)
             respuesta = response["assistant_answer_text"]
