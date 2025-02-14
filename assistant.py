@@ -154,26 +154,21 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
             "tool_output_details": None
         }
 
-    # Buscar JSON para informe pre-post
+    # Generación del informe pre-post: se recorre en orden inverso para capturar la solicitud más reciente.
     pdf_base64 = None
     pdf_confirmation_msg = None
-    pdf_already_generated = any(
-        msg.role == "assistant" and join_msg_content(msg) and "informe pre-post para" in join_msg_content(msg).lower()
-        for msg in all_msgs
-    )
-    if not pdf_already_generated:
-        for msg in all_msgs:
-            if msg.role == "assistant":
-                parsed = try_parse_function_call(join_msg_content(msg))
-                if parsed and parsed.get("function_name") == "generate_prepost_report":
-                    fn_args = parsed["arguments"]
-                    patient_name = fn_args.get("patient_name", "Paciente")
-                    patient_age = fn_args.get("patient_age", 0)
-                    cog_results = fn_args.get("cognitive_results", {})
-                    pdf_bytes = generate_informe_prepost_cem_3pages(patient_name, patient_age, cog_results)
-                    pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-                    pdf_confirmation_msg = f"¡Aquí tienes tu informe pre-post para {patient_name} (edad {patient_age})!"
-                    break
+    for msg in reversed(all_msgs):
+        if msg.role == "assistant":
+            parsed = try_parse_function_call(join_msg_content(msg))
+            if parsed and parsed.get("function_name") == "generate_prepost_report":
+                fn_args = parsed["arguments"]
+                patient_name = fn_args.get("patient_name", "Paciente")
+                patient_age = fn_args.get("patient_age", 0)
+                cog_results = fn_args.get("cognitive_results", {})
+                pdf_bytes = generate_informe_prepost_cem_3pages(patient_name, patient_age, cog_results)
+                pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+                pdf_confirmation_msg = f"¡Aquí tienes tu informe pre-post para {patient_name} (edad {patient_age})!"
+                break
 
     if pdf_base64:
         client.beta.threads.messages.create(
