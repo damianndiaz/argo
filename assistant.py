@@ -12,32 +12,30 @@ from recordatorios import agendar_turno_y_programar_recordatorios
 # Zona horaria de Argentina
 ARG_TZ = pytz.timezone("America/Argentina/Buenos_Aires")
 
+
 def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, assistant_id: str = "asst_XKvU1ulcVEy8UZd5fatnZ60c"):
     """
     Envía el mensaje del usuario a la Beta de Threads y procesa la respuesta.
     
     Flujo:
-    1) Crea un thread si no existe, inyectando instrucciones internas.
-    2) Agrega el mensaje del usuario.
-    3) Ejecuta el Assistant y espera la respuesta.
-    4) Revisa los mensajes del assistant para ver si hay un JSON con:
-       - function_name="generate_prepost_report": Genera el PDF.
-       - function_name="schedule_appointment": Extrae los datos y agenda el turno.
-         Si el número de WhatsApp no se proporciona, devuelve un mensaje solicitándolo.
-    5) Si no se detecta ninguna función especial, devuelve la respuesta textual normal.
+      1) Crea un thread si no existe, inyectando instrucciones internas.
+      2) Agrega el mensaje del usuario.
+      3) Ejecuta el Assistant y espera la respuesta.
+      4) Revisa los mensajes del assistant para ver si hay un JSON con:
+         - function_name="generate_prepost_report": Genera el PDF.
+         - function_name="schedule_appointment": Agenda un turno.
+      5) Si no se detecta ninguna función especial, devuelve la respuesta textual normal.
     """
     if not thread_id:
         print("Ningún thread_id provisto, generando uno nuevo...")
         internal_instructions = (
-            "Sos Argo, un médico argentino experto en entrenamiento físico, cognitivo, nutrición y neurociencias, "
+            "Sos Argo, un médico argentino especializado en entrenamiento físico, cognitivo, nutrición y neurociencias, "
             "con experiencia en el abordaje de niños, adolescentes y adultos con obesidad, TDAH y TEA. "
-            "Trabajás en el Centro de Entrenamiento Marangoni (CEM), donde colaborás con entrenadores y médicos "
-            "para brindar asistencia fundamentada y profesional. Mantené un tono respetuoso y claro pero evitá ser robótico.\n\n"
+            "Trabajás en el Centro de Entrenamiento Marangoni, donde colaborás con entrenadores y médicos para brindar asistencia fundamentada y profesional. "
+            "Mantené un tono respetuoso y claro, pero evitá ser robótico.\n\n"
             "**Normas Generales**\n"
-            "- Responde únicamente con información relacionada a entrenamiento físico, cognitivo, nutrición, funciones ejecutivas o neurociencias.\n"
-            "- Ignorá términos desconocidos, fragmentos aleatorios o conceptos que no pertenezcan a tu campo.\n"
-            "- No seas básico ni repetitivo en las respuestas, informate antes de responder con toda la info que tenes en el File Search. Sé profesional."
-            "- Si no tenés información suficiente, respondé con: 'Actualmente no tengo información suficiente para responder con precisión.'\n\n"
+            "- Responde únicamente con información relacionada a entrenamiento físico, cognitivo, nutrición o neurociencias.\n"
+            "- No incluyas texto adicional en respuestas de informes pre-post o turnos.\n\n"
             "**Respuestas con JSON (Informes Pre/Post)**\n"
             "- Si se te pide un informe Pre/Post, responde **exclusivamente** con un JSON en el siguiente formato:\n"
             "```json\n"
@@ -45,17 +43,16 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
             '  "function_name": "generate_prepost_report",\n'
             '  "arguments": {\n'
             '    "patient_name": "NOMBRE",\n'
-            '    "patient_age": 9,\n'
+            '    "patient_age": EDAD,\n'
             '    "cognitive_results": {\n'
-            '      "Métrica 1": {"pre": 0, "post": 0},\n'
-            '      "Métrica 2": {"pre": 0, "post": 0}\n'
+            '      "Métrica 1": {"pre": VALOR, "post": VALOR},\n'
+            '      "Métrica 2": {"pre": VALOR, "post": VALOR}\n'
             "    }\n"
             "  }\n"
             "}\n"
-            "```\n"
-            "- NO incluyas texto adicional.\n\n"
+            "```\n\n"
             "**Solicitud de Agendamiento de Turnos**\n"
-            "- Si se te solicita agendar un turno, responde **exclusivamente** con un JSON en el siguiente formato:\n"
+            "- Responde **exclusivamente** con un JSON en el siguiente formato:\n"
             "```json\n"
             "{\n"
             '  "function_name": "schedule_appointment",\n'
@@ -67,7 +64,6 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
             "  }\n"
             "}\n"
             "```\n"
-            "- NO incluyas texto adicional.\n"
         )
         thread = client.beta.threads.create(
             messages=[
@@ -87,7 +83,7 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
             role="user",
             content="Hola, me explicarías de qué forma puedes ayudarme?"
         )
-        print("El usuario envía mensaje inicial vacío. Se agrega uno por default.")
+        print("Mensaje inicial vacío, se agrega por defecto.")
     else:
         message = client.beta.threads.messages.create(
             thread_id=thread_id,
@@ -161,10 +157,9 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
     # Buscar el índice del último mensaje del usuario que solicitó "informe pre post"
     last_informe_index = None
     for i, msg in enumerate(all_msgs):
-        if msg.role == "user" and "informe pre post" in msg.content.lower():
+        if msg.role == "user" and "informe pre post" in join_msg_content(msg).lower():
             last_informe_index = i
 
-    # Si se encontró una solicitud, procesamos solo los mensajes posteriores a esa solicitud
     if last_informe_index is not None:
         for msg in reversed(all_msgs[last_informe_index+1:]):
             if msg.role == "assistant":
@@ -174,11 +169,28 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
                     patient_name = fn_args.get("patient_name", "Paciente")
                     patient_age = fn_args.get("patient_age", 0)
                     cog_results = fn_args.get("cognitive_results", {})
-                    # Generar el PDF con los parámetros actualizados
                     pdf_bytes = generate_informe_prepost_cem_3pages(patient_name, patient_age, cog_results)
                     pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
-                    pdf_confirmation_msg = f"¡Aquí tienes tu informe pre-post para {patient_name} (edad {patient_age})!"
+                    pdf_confirmation_msg = f"¡Aquí tenés tu informe pre-post para {patient_name} (edad {patient_age})!"
                     break
+
+    # Si se detectó la solicitud pero no se generó PDF, intentamos extraer los parámetros directamente
+    if last_informe_index is not None and pdf_base64 is None:
+        user_request_text = join_msg_content(all_msgs[last_informe_index])
+        parsed_request = parse_prepost_request(user_request_text)
+        if parsed_request:
+            patient_name = parsed_request["patient_name"]
+            patient_age = parsed_request["patient_age"]
+            cognitive_results = parsed_request["cognitive_results"]
+            pdf_bytes = generate_informe_prepost_cem_3pages(patient_name, patient_age, cognitive_results)
+            pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+            pdf_confirmation_msg = f"¡Aquí tenés tu informe pre-post para {patient_name} (edad {patient_age})!"
+        else:
+            return {
+                "thread_id": thread_id,
+                "assistant_answer_text": "No se encontró información suficiente para generar el informe pre post. Asegurate de enviar la solicitud en el formato correcto.",
+                "tool_output_details": None
+            }
 
     if pdf_base64:
         client.beta.threads.messages.create(
@@ -186,14 +198,13 @@ def get_assistant_answer(client, user_msg: str = None, thread_id: str = None, as
             role="assistant",
             content=pdf_confirmation_msg
         )
-        final_answer = pdf_confirmation_msg
         return {
             "thread_id": thread_id,
-            "assistant_answer_text": final_answer,
+            "assistant_answer_text": pdf_confirmation_msg,
             "tool_output_details": {"pdf_base64": pdf_base64}
         }
 
-    # Si no se detectó ningún caso especial, se devuelve la respuesta textual normal
+    # --- Respuesta textual por defecto ---
     answer_raw = ""
     for msg in all_msgs:
         if msg.role == "assistant":
@@ -227,16 +238,12 @@ def try_parse_function_call(response_str: str):
     response_str = response_str.strip()
     if not response_str:
         return None
-
-    # Solo intentamos parsear si el contenido parece JSON:
     if response_str.startswith("```json"):
         response_str = response_str.replace("```json", "", 1).strip()
         if response_str.endswith("```"):
             response_str = response_str[:-3].strip()
     elif not response_str.startswith("{"):
-        # Si no comienza con una llave, asumimos que no es JSON
         return None
-
     try:
         data = json.loads(response_str)
         return data
@@ -244,12 +251,46 @@ def try_parse_function_call(response_str: str):
         print("Error parsing JSON:", e)
         return None
 
+def parse_prepost_request(text):
+    """
+    Extrae los parámetros para generar el informe pre-post a partir del texto del usuario.
+    Se busca extraer:
+      - Nombre del paciente (después de "el paciente es")
+      - Edad (después de "tiene ... años")
+      - Resultados cognitivos: cada métrica se asume en el formato:
+            "Nombre Métrica: Pre <número> Post <número>"
+         (El signo de dos puntos es opcional)
+    Devuelve un diccionario con las claves "patient_name", "patient_age" y "cognitive_results".
+    Si no se encuentran los datos, devuelve None.
+    """
+    name_match = re.search(r"el paciente es\s+([\w\s]+?)(?:\s+(?:y|,))", text, re.IGNORECASE)
+    age_match = re.search(r"tiene\s+(\d+)\s*años", text, re.IGNORECASE)
+    if not name_match or not age_match:
+        return None
+    patient_name = name_match.group(1).strip()
+    patient_age = int(age_match.group(1).strip())
+    
+    cognitive_results = {}
+    # Permite que el colon sea opcional (usando :?)
+    matches = re.findall(r"([\w\s\(\)\-]+):?\s*Pre\s*(\d+)\s*Post\s*(\d+)", text, re.IGNORECASE)
+    for metric, pre_val, post_val in matches:
+        metric_name = metric.strip()
+        cognitive_results[metric_name] = {"pre": int(pre_val), "post": int(post_val)}
+    
+    if not cognitive_results:
+        return None
+    return {
+        "patient_name": patient_name,
+        "patient_age": patient_age,
+        "cognitive_results": cognitive_results
+    }
+
 def generate_informe_prepost_cem_3pages(patient_name: str, patient_age: int, cognitive_results: dict) -> bytes:
     """
     Genera un PDF de 3 páginas con información Pre/Post:
-      - Pag 1: Portada
-      - Pag 2: Metodología
-      - Pag 3: Datos del paciente y gráfico
+      - Página 1: Portada
+      - Página 2: Metodología
+      - Página 3: Datos del paciente y gráfico comparativo
     """
     metrics = list(cognitive_results.keys())
     pre_vals = [cognitive_results[m]["pre"] for m in metrics]
@@ -289,9 +330,9 @@ def generate_informe_prepost_cem_3pages(patient_name: str, patient_age: int, cog
     pdf.ln(10)
     pdf.set_font("Arial", "", 28)
     metodologia_text = (
-        "* Administración pre/post de Yelow red (funciones ejecutivas)\n"
-        "* Experiencia de intervención realizada en el programa\n"
-        "  correspondiente a: PIPS"
+        "* Administración pre/post de pruebas de funciones ejecutivas\n"
+        "* Evaluación comparativa de rendimiento cognitivo y motor\n"
+        "* Aplicación de protocolos internos del CEM"
     )
     pdf.multi_cell(0, 8, metodologia_text, align="L")
 
@@ -303,7 +344,6 @@ def generate_informe_prepost_cem_3pages(patient_name: str, patient_age: int, cog
     pdf.set_font("Arial", "B", 32)
     pdf.ln(10)
     pdf.cell(0, 10, f"{patient_name}, {patient_age} años.", ln=True)
-
     pdf.image(temp_img_path, x=100, y=40, w=170)
 
     if os.path.exists(temp_img_path):
